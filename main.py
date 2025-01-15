@@ -1,11 +1,12 @@
 import streamlit as st
-from langchain_community.vectorstores import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import WebBaseLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
+# Import FAISS VectorStore
+from langchain.vectorstores import FAISS
 
 # Configure Streamlit
 st.set_page_config(page_title="Website Chatbot", layout="wide")
@@ -31,7 +32,6 @@ def load_website(website_url: str):
     data = loader.load()
     return data
 
-
 def process_data(data):
     """
     Splits documents into manageable chunks.
@@ -39,7 +39,6 @@ def process_data(data):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = text_splitter.split_documents(data)
     return splits
-
 
 def get_google_api_key():
     """
@@ -51,7 +50,6 @@ def get_google_api_key():
         st.stop()
     return st.secrets["GOOGLE_API_KEY"]
 
-
 def get_embeddings(api_key):
     """
     Initialize GoogleGenerativeAIEmbeddings.
@@ -60,7 +58,6 @@ def get_embeddings(api_key):
         model="models/embedding-001",
         api_key=api_key
     )
-
 
 def get_llm(api_key):
     """
@@ -71,14 +68,16 @@ def get_llm(api_key):
         api_key=api_key
     )
 
-
 def get_vectorstore(docs, embedding_fn):
     """
-    Create a Chroma vector store from documents.
+    Create a FAISS vector store from documents.
     """
-    vectorstore = Chroma.from_documents(docs, embedding_fn)
-    return vectorstore
+    texts = [doc.page_content for doc in docs]
+    metadatas = [doc.metadata for doc in docs]
 
+    # FAISS.from_texts() requires a list of strings and the embeddings function
+    vectorstore = FAISS.from_texts(texts, embedding_fn, metadatas=metadatas)
+    return vectorstore
 
 # Main logic
 if url:
@@ -98,7 +97,7 @@ if url:
     google_api_key = get_google_api_key()
     embeddings = get_embeddings(google_api_key)
 
-    with st.spinner("📦 Creating vector store..."):
+    with st.spinner("📦 Creating FAISS vector store..."):
         vectorstore = get_vectorstore(splits, embeddings)
 
     # Initialize the LLM
