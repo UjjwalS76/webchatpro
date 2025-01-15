@@ -6,6 +6,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
+
 # Configure Streamlit
 st.set_page_config(page_title="Website Chatbot", layout="wide")
 st.title("🗣️ Chat with Website Content")
@@ -19,8 +20,6 @@ url = st.sidebar.text_input(
     value=""
 )
 
-# Function to load website data
-@st.cache_data(show_spinner=False)
 def load_website(website_url: str):
     """
     Loads text content from a specified URL using WebBaseLoader.
@@ -32,14 +31,16 @@ def load_website(website_url: str):
     data = loader.load()
     return data
 
-# Function to process website data
-@st.cache_data(show_spinner=False)
+
 def process_data(data):
+    """
+    Splits documents into manageable chunks.
+    """
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = text_splitter.split_documents(data)
     return splits
 
-# Retrieve API key from Streamlit secrets
+
 def get_google_api_key():
     """
     Retrieve the Google API key from Streamlit's secrets.
@@ -50,13 +51,34 @@ def get_google_api_key():
         st.stop()
     return st.secrets["GOOGLE_API_KEY"]
 
-# Function to initialize embeddings
-def get_embeddings(api_key):
-    return GoogleGenerativeAIEmbeddings(model="models/embedding-001", api_key=api_key)
 
-# Function to initialize LLM
+def get_embeddings(api_key):
+    """
+    Initialize GoogleGenerativeAIEmbeddings.
+    """
+    return GoogleGenerativeAIEmbeddings(
+        model="models/embedding-001",
+        api_key=api_key
+    )
+
+
 def get_llm(api_key):
-    return ChatGoogleGenerativeAI(model="gemini-1.5-flash-002", api_key=api_key)
+    """
+    Initialize the ChatGoogleGenerativeAI LLM with Gemini model.
+    """
+    return ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash-002",
+        api_key=api_key
+    )
+
+
+def get_vectorstore(docs, embedding_fn):
+    """
+    Create a Chroma vector store from documents.
+    """
+    vectorstore = Chroma.from_documents(docs, embedding_fn)
+    return vectorstore
+
 
 # Main logic
 if url:
@@ -75,11 +97,6 @@ if url:
     # Get API key and set up embeddings
     google_api_key = get_google_api_key()
     embeddings = get_embeddings(google_api_key)
-
-    # Create or load vector store
-    @st.cache_resource(show_spinner=False)
-    def get_vectorstore(docs, embedding_fn):
-        return Chroma.from_documents(docs, embedding_fn)
 
     with st.spinner("📦 Creating vector store..."):
         vectorstore = get_vectorstore(splits, embeddings)
