@@ -6,102 +6,115 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 
-# Initialize Streamlit app
+# Configure Streamlit
 st.set_page_config(page_title="Website Chatbot", layout="wide")
-st.title("Chat with Website Content")
+st.title("🗣️ Chat with Website Content")
 
-# Sidebar for API Key input and other configurations
-st.sidebar.header("Configuration")
-default_url = "https://www.vedabase.io/"
+# Sidebar configuration
+st.sidebar.header("🔧 Configuration")
 
-# Input for website URL
-url = st.sidebar.text_input("Enter Website URL", value=default_url)
+# User inputs website URL (no default)
+url = st.sidebar.text_input(
+    "Enter a valid website URL (including http:// or https://)",
+    value=""
+)
 
 # Function to load website data
 @st.cache_data(show_spinner=False)
-def website_loader(url):
-    loader = WebBaseLoader(url)
+def load_website(website_url: str):
+    """
+    Loads text content from a specified URL using WebBaseLoader.
+    Raises an exception if the URL is invalid or unreachable.
+    """
+    if not (website_url.startswith("http://") or website_url.startswith("https://")):
+        raise ValueError("Please enter a valid URL with http:// or https://.")
+    loader = WebBaseLoader(website_url)
     data = loader.load()
     return data
 
 # Function to process website data
 @st.cache_data(show_spinner=False)
-def process_website(data):
+def process_data(data):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     splits = text_splitter.split_documents(data)
     return splits
 
+# Retrieve API key from Streamlit secrets
+def get_google_api_key():
+    """
+    Retrieve the Google API key from Streamlit's secrets.
+    If not set, show an error message and stop execution.
+    """
+    if "GOOGLE_API_KEY" not in st.secrets:
+        st.error("❌ Google API key not found in Streamlit secrets.")
+        st.stop()
+    return st.secrets["GOOGLE_API_KEY"]
+
 # Function to initialize embeddings
-def initialize_embeddings(api_key):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", api_key=api_key)
-    return embeddings
+def get_embeddings(api_key):
+    return GoogleGenerativeAIEmbeddings(model="models/embedding-001", api_key=api_key)
 
 # Function to initialize LLM
-def initialize_llm(api_key):
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-002", api_key=api_key)
-    return llm
+def get_llm(api_key):
+    return ChatGoogleGenerativeAI(model="gemini-1.5-flash-002", api_key=api_key)
 
-# Load and process website data
+# Main logic
 if url:
-    with st.spinner("Loading website data..."):
-        website_data = website_loader(url)
-    with st.spinner("Processing website data..."):
-        splits = process_website(website_data)
+    # Try loading the website data if the user has entered a URL
+    try:
+        with st.spinner("🔍 Loading website data..."):
+            website_data = load_website(url)
+    except Exception as e:
+        st.error(f"Error loading website: {e}")
+        st.stop()
+
+    # Process the data
+    with st.spinner("🛠️ Processing website data..."):
+        splits = process_data(website_data)
+
+    # Get API key and set up embeddings
+    google_api_key = get_google_api_key()
+    embeddings = get_embeddings(google_api_key)
+
+    # Create or load vector store
+    @st.cache_resource(show_spinner=False)
+    def get_vectorstore(docs, embedding_fn):
+        return Chroma.from_documents(docs, embedding_fn)
+
+    with st.spinner("📦 Creating vector store..."):
+        vectorstore = get_vectorstore(splits, embeddings)
+
+    # Initialize the LLM
+    llm = get_llm(google_api_key)
+
+    # Conversation memory
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+    # Create Conversational Retrieval Chain
+    qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=vectorstore.as_retriever(),
+        memory=memory
+    )
+
+    st.header("💬 Ask Questions About the Website:")
+    user_input = st.text_input("You:", key="input")
+
+    if st.button("Send") and user_input.strip():
+        with st.spinner("🧠 Generating response..."):
+            try:
+                response = qa_chain({"question": user_input})
+                answer = response['answer']
+                st.session_state.setdefault('questions', []).append(user_input)
+                st.session_state.setdefault('responses', []).append(answer)
+            except Exception as e:
+                st.error(f"Error generating response: {e}")
+
+    # Display chat history
+    if 'responses' in st.session_state and st.session_state.responses:
+        st.markdown("### 🗨️ Chat History")
+        for i in range(len(st.session_state.responses)):
+            st.markdown(f"**You:** {st.session_state.questions[i]}")
+            st.markdown(f"**Bot:** {st.session_state.responses[i]}")
 else:
-    st.warning("Please enter a website URL.")
-
-# Initialize embeddings and LLM using API keys from secrets
-if "google_api_key" not in st.secrets:
-    st.error("Google API key not found in secrets.")
-    st.stop()
-
-google_api_key = st.secrets["GOOGLE_API_KEY"]
-embeddings = initialize_embeddings(google_api_key)
-
-llm = initialize_llm(google_api_key)
-
-# Create or load vector store
-@st.cache_resource(show_spinner=False)
-def get_vectorstore(splits, embeddings):
-    vectorstore = Chroma.from_documents(splits, embeddings)
-    return vectorstore
-
-with st.spinner("Creating vector store..."):
-    vectorstore = get_vectorstore(splits, embeddings)
-
-# Initialize memory
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-# Create Conversational Retrieval Chain
-qa = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=vectorstore.as_retriever(),
-    memory=memory
-)
-
-# Chat interface
-def chat_with_website(query):
-    answer = qa({"question": query})
-    return answer['answer']
-
-# Streamlit chat interface
-if "responses" not in st.session_state:
-    st.session_state.responses = []
-if "questions" not in st.session_state:
-    st.session_state.questions = []
-
-st.header("Ask questions about the website:")
-user_input = st.text_input("You:", key="input")
-
-if st.button("Send") and user_input:
-    with st.spinner("Generating response..."):
-        response = chat_with_website(user_input)
-    st.session_state.questions.append(user_input)
-    st.session_state.responses.append(response)
-
-# Display chat history
-if st.session_state.responses:
-    st.markdown("### Chat History")
-    for i in range(len(st.session_state.responses)):
-        st.markdown(f"**You:** {st.session_state.questions[i]}")
-        st.markdown(f"**Bot:** {st.session_state.responses[i]}")
+    st.info("🔄 Please enter a valid website URL (including http:// or https://) to get started.")
