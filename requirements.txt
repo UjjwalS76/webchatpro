@@ -2,6 +2,6 @@ streamlit
 langchain
 langchain-community
 langchain-google-genai
-chromadb
 beautifulsoup4
 requests
+faiss-cpu
